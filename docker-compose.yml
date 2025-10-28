@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   gate-simulator:
-    image: openjdk:11-jre-slim
+    image: node:16-alpine
     container_name: gate_simulator
     ports:
       - "9999:9999"
