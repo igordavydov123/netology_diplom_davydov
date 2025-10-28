@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  gate-simulator:
+    image: openjdk:11-jre-slim
+    container_name: gate_simulator
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./gate-simulator.jar:/app/gate-simulator.jar
+      - ./gate-data.json:/app/gate-data.json
+    environment:
+      GATE_DATA_FILE: /app/gate-data.json
+    command: java -jar /app/gate-simulator.jar
+    restart: unless-stopped
+
+  aqa-shop:
+    image: openjdk:11-jre-slim
+    container_name: aqa_shop
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./aqa-shop.jar:/app/aqa-shop.jar
+    environment:
+      SPRING_CREDIT_GATE_URL: http://gate-simulator:9999/credit
+      SPRING_PAYMENT_GATE_URL: http://gate-simulator:9999/payment
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/app
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: pass
+    command: java -jar /app/aqa-shop.jar
+    depends_on:
+      - mysql
+      - gate-simulator
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
