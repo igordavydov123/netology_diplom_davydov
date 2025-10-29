@@ -45,15 +45,11 @@ pip install -r requirements.txt
 
 Откройте файл test_tour.py
 
-#### Запустите тесты одним из способов:
+#### Запустите тесты командой:
 
-- Правой кнопкой мыши на файле → "Run 'test_tour'"
-
-- Через меню Run → Run...
-
-- Используя сочетание клавиш (Ctrl+Shift+F10)
-
-- командой `pytest test_tour.py`
+```bash
+pytest tests/test_tour.py -v
+```
 
 ### 4. Просмотр результатов тестирования
 
