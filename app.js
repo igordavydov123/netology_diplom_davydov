@@ -1,5 +1,6 @@
 const fs = require('fs');
 const express = require('express');
+const app = express();
 const uuidv4 = require('uuid/v4');
 
 const data = JSON.parse(fs.readFileSync('data.json', 'UTF-8'));
