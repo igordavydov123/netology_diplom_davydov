@@ -1,6 +1,8 @@
 import pytest
 import datetime
 import os
+import allure
+from selenium import webdriver
 from typing import Dict, List
 
 # Глобальные переменные для сбора статистики
@@ -13,6 +15,28 @@ test_results = {
     'end_time': None
 }
 
+@pytest.fixture(scope="function")
+def driver():
+    driver = webdriver.Chrome()
+    yield driver
+    driver.quit()
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+
+    if rep.when == "call" and rep.failed:
+        try:
+            driver = item.funcargs["driver"]
+            allure.attach(
+                driver.get_screenshot_as_png(),
+                name="screenshot",
+                attachment_type=allure.attachment_type.PNG
+            )
+        except Exception as e:
+            print(f"Failed to take screenshot: {e}")
 
 def pytest_configure(config):
     """Вызывается при настройке pytest"""
