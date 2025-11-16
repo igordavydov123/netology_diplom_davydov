@@ -23,10 +23,69 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install allure-pytest
+          pip install requests
+          pip install sqlalchemy
+          pip install psycopg2-binary
+          pip install pymysql
+          pip install pytest-html
+          pip install pytest-rerunfailures
+          pip install faker
 
-      - name: Run tests with Allure
+      - name: Install system dependencies for screenshots
         run: |
-          python -m pytest --alluredir=allure-results
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnotify4 libnss3 libxss1 libappindicator3-1 libasound2 libdbus-1-3
+
+      - name: Create directories for artifacts
+        run: |
+          mkdir -p allure-results/screenshots
+          mkdir -p allure-results/logs
+          mkdir -p allure-results/db-snapshots
+
+      - name: Run tests with Allure and enhanced logging
+        run: |
+          xvfb-run -a python -m pytest \
+            --alluredir=allure-results \
+            -v \
+            --capture=no \
+            --screenshot=on \
+            --screenshot-dir=allure-results/screenshots \
+            --html=allure-results/report.html \
+            --self-contained-html \
+            --log-cli-level=INFO \
+            --log-file=allure-results/pytest.log \
+            --log-file-level=DEBUG \
+            --tb=long
+
+      - name: Run failed tests with screenshot on failure
+        if: failure()
+        run: |
+          xvfb-run -a python -m pytest \
+            --alluredir=allure-results \
+            -v \
+            --capture=no \
+            --screenshot=on \
+            --screenshot-dir=allure-results/screenshots \
+            --only-rerun=".*" \
+            --reruns=1 \
+            --reruns-delay=2
+
+      - name: Collect additional test artifacts
+        if: always()
+        run: |
+          # Copy API logs if they exist
+          find . -name "*.log" -exec cp {} allure-results/logs/ \; || true
+          find . -name "api_*.log" -exec cp {} allure-results/logs/ \; || true
+          
+          # Copy database snapshots if they exist
+          find . -name "db_snapshot_*.json" -exec cp {} allure-results/db-snapshots/ \; || true
+          find . -name "db_*.sql" -exec cp {} allure-results/db-snapshots/ \; || true
+          
+          # Create summary file with test results
+          echo "Test Execution Summary" > allure-results/execution-summary.txt
+          echo "======================" >> allure-results/execution-summary.txt
+          date >> allure-results/execution-summary.txt
+          echo "" >> allure-results/execution-summary.txt
 
       - name: Set up Node.js for Allure CLI
         uses: actions/setup-node@v3
@@ -46,9 +105,22 @@ jobs:
         with:
           name: allure-report
           path: allure-report
+          retention-days: 30
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts
+          path: |
+            allure-results/
+            screenshots/
+            logs/
+          retention-days: 30
 
       - name: Deploy Allure report to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./allure-report
+          force_orphan: true

@@ -10,7 +10,7 @@ services:
       MYSQL_USER: app
       MYSQL_PASSWORD: pass
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
     volumes:
       - ./app.js:/app/app.js
       - ./data.json:/app/data.json
-      - ./package.json:/app/package.json  # если есть package.json
+      - ./package.json:/app/package.json
     environment:
       GATE_DATA_FILE: /app/data.json
     working_dir: /app
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   aqa-shop:
-    image: openjdk:11-jre-slim
+    image: eclipse-temurin:11-jre
     container_name: aqa_shop
     ports:
       - "8080:8080"

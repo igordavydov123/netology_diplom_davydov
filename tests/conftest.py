@@ -1,5 +1,7 @@
 import pytest
-import datetime
+from datetime import datetime
+import logging
+import json
 import os
 import allure
 from selenium import webdriver
@@ -22,11 +24,161 @@ def driver():
     driver.quit()
 
 
+def pytest_configure(config):
+    # Create logs directory
+    os.makedirs('logs', exist_ok=True)
+
+    # Configure API logger
+    api_logger = logging.getLogger('api')
+    api_logger.setLevel(logging.DEBUG)
+
+    # File handler for API logs
+    fh = logging.FileHandler('logs/api_requests.log')
+    fh.setLevel(logging.DEBUG)
+
+    # Formatter for API logs
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    fh.setFormatter(formatter)
+    api_logger.addHandler(fh)
+
+
+# Fixture for API request logging
+@pytest.fixture
+def api_logger():
+    return logging.getLogger('api')
+
+
+# Fixture for database snapshots
+@pytest.fixture
+def db_snapshot(request):
+    snapshots = []
+
+    def take_snapshot(connection, query, snapshot_name):
+        try:
+            result = connection.execute(query)
+            data = [dict(row) for row in result]
+
+            snapshot_data = {
+                'name': snapshot_name,
+                'timestamp': datetime.now().isoformat(),
+                'data': data
+            }
+
+            # Save to file
+            filename = f"db_snapshot_{snapshot_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(filename, 'w') as f:
+                json.dump(snapshot_data, f, indent=2)
+
+            # Attach to Allure
+            allure.attach(
+                json.dumps(snapshot_data, indent=2),
+                name=f"DB Snapshot: {snapshot_name}",
+                attachment_type=allure.attachment_type.JSON
+            )
+
+            snapshots.append(snapshot_data)
+            return data
+
+        except Exception as e:
+            logging.error(f"Failed to take DB snapshot {snapshot_name}: {e}")
+            return None
+
+    def finalizer():
+        # Save all snapshots to a single file
+        if snapshots:
+            summary_file = f"db_snapshots_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(summary_file, 'w') as f:
+                json.dump(snapshots, f, indent=2)
+
+    request.addfinalizer(finalizer)
+    return take_snapshot
+
+
+# Automatic screenshot on test failure
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+
+    if report.when == "call" and report.failed:
+        try:
+            # Take screenshot using Playwright/Selenium if available
+            if hasattr(item, 'funcargs'):
+                page = item.funcargs.get('page')
+                if page:
+                    screenshot = page.screenshot()
+                    allure.attach(
+                        screenshot,
+                        name="screenshot_on_failure",
+                        attachment_type=allure.attachment_type.PNG
+                    )
+        except Exception as e:
+            print(f"Failed to take screenshot: {e}")
+
+
+# API request interceptor for logging
+@pytest.fixture
+def log_api_requests(api_logger):
+    import requests
+
+    original_request = requests.Session.request
+
+    def logged_request(self, method, url, **kwargs):
+        # Log request
+        request_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+
+        request_log = {
+            'request_id': request_id,
+            'method': method,
+            'url': url,
+            'headers': kwargs.get('headers', {}),
+            'params': kwargs.get('params', {}),
+            'data': kwargs.get('data', {}),
+            'json': kwargs.get('json', {}),
+            'timestamp': datetime.now().isoformat()
+        }
+
+        api_logger.info(f"REQUEST: {json.dumps(request_log)}")
+
+        # Make request
+        response = original_request(self, method, url, **kwargs)
+
+        # Log response
+        response_log = {
+            'request_id': request_id,
+            'status_code': response.status_code,
+            'headers': dict(response.headers),
+            'response_time': response.elapsed.total_seconds(),
+            'content_sample': response.text[:1000] if response.text else ''
+        }
+
+        api_logger.info(f"RESPONSE: {json.dumps(response_log)}")
+
+        # Attach to Allure
+        allure.attach(
+            json.dumps(request_log, indent=2),
+            name=f"API Request {request_id}",
+            attachment_type=allure.attachment_type.JSON
+        )
+
+        allure.attach(
+            json.dumps(response_log, indent=2),
+            name=f"API Response {request_id}",
+            attachment_type=allure.attachment_type.JSON
+        )
+
+        return response
+
+    requests.Session.request = logged_request
+    yield
+    requests.Session.request = original_request
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
-
     if rep.when == "call" and rep.failed:
         try:
             driver = item.funcargs["driver"]
@@ -38,25 +190,13 @@ def pytest_runtest_makereport(item, call):
         except Exception as e:
             print(f"Failed to take screenshot: {e}")
 
-def pytest_configure(config):
-    """Вызывается при настройке pytest"""
-    # Убедимся, что старый отчет удален
-    if os.path.exists("report.md"):
-        os.remove("report.md")
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_sessionstart(session):
-    """Вызывается при старте сессии тестирования"""
-    test_results['start_time'] = datetime.datetime.now()
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_sessionfinish(session, exitstatus):
-    """Вызывается при завершении сессии тестирования"""
-    test_results['end_time'] = datetime.datetime.now()
-    generate_report()
-
+def take_screenshot(driver, nodeid):
+    file_name = f"{nodeid.replace(':', '_')}.png"
+    screenshot_dir = "allure-results/screenshots"
+    os.makedirs(screenshot_dir, exist_ok=True)
+    file_path = os.path.join(screenshot_dir, file_name)
+    driver.save_screenshot(file_path)
+    allure.attach.file(file_path, name="Screenshot on Failure", attachment_type=allure.attachment_type.PNG)
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
